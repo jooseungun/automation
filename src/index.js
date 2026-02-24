@@ -474,14 +474,14 @@ function sanitizeFilename(str) {
     .trim() || 'unknown';
 }
 
-// ===== Gemini AI 분석 =====
+// ===== Cloudflare Workers AI 분석 =====
 
 // 프로젝트 전체 파일 분석
 async function handleAnalyzeAll(projectId, env, corsHeaders) {
-  // API 키 확인
-  if (!env.GEMINI_API_KEY) {
+  // Workers AI 바인딩 확인
+  if (!env.AI) {
     return new Response(JSON.stringify({ 
-      error: 'Gemini API 키가 설정되지 않았습니다. Cloudflare 대시보드에서 GEMINI_API_KEY 환경변수를 설정해주세요.' 
+      error: 'Workers AI가 설정되지 않았습니다. wrangler.toml에 AI 바인딩을 추가해주세요.' 
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -517,14 +517,14 @@ async function handleAnalyzeAll(projectId, env, corsHeaders) {
   for (const filename of files) {
     const fileId = filename.replace(/\.[^/.]+$/, '');
     
-    // 이미 분석된 파일은 건너뛰기 (강제 재분석 원하면 별도 옵션 추가 가능)
+    // 이미 분석된 파일은 건너뛰기
     if (results[fileId] && results[fileId].merchant) {
       analyzed.push({ filename, status: 'skipped', reason: '이미 분석됨' });
       continue;
     }
 
     try {
-      const result = await analyzeWithGemini(projectId, filename, env);
+      const result = await analyzeWithWorkersAI(projectId, filename, env);
       results[fileId] = result;
       analyzed.push({ filename, status: 'success', result });
     } catch (error) {
@@ -552,9 +552,9 @@ async function handleAnalyzeAll(projectId, env, corsHeaders) {
 
 // 단일 파일 분석
 async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
-  if (!env.GEMINI_API_KEY) {
+  if (!env.AI) {
     return new Response(JSON.stringify({ 
-      error: 'Gemini API 키가 설정되지 않았습니다.' 
+      error: 'Workers AI가 설정되지 않았습니다.' 
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -562,7 +562,7 @@ async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
   }
 
   try {
-    const result = await analyzeWithGemini(projectId, filename, env);
+    const result = await analyzeWithWorkersAI(projectId, filename, env);
     
     // 결과 저장
     const fileId = filename.replace(/\.[^/.]+$/, '');
@@ -599,8 +599,8 @@ async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
   }
 }
 
-// Gemini API로 이미지 분석
-async function analyzeWithGemini(projectId, filename, env) {
+// Cloudflare Workers AI로 이미지 분석
+async function analyzeWithWorkersAI(projectId, filename, env) {
   const prefix = `projects/${projectId}/uploads/`;
   const object = await env.RECEIPTS_BUCKET.get(`${prefix}${filename}`);
   
@@ -608,98 +608,67 @@ async function analyzeWithGemini(projectId, filename, env) {
     throw new Error('파일을 찾을 수 없습니다');
   }
 
-  // 이미지를 base64로 변환
-  const arrayBuffer = await object.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+  // 이미지를 Uint8Array로 변환
+  const imageData = new Uint8Array(await object.arrayBuffer());
   
-  // MIME 타입 결정
-  const ext = filename.split('.').pop().toLowerCase();
-  const mimeTypes = {
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'gif': 'image/gif',
-    'webp': 'image/webp',
-    'pdf': 'application/pdf',
-  };
-  const mimeType = mimeTypes[ext] || 'image/jpeg';
-
-  // Gemini API 호출
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            {
-              text: `이 영수증 이미지를 분석해서 다음 정보를 JSON 형식으로 추출해주세요.
-반드시 아래 형식의 JSON만 응답해주세요. 다른 텍스트 없이 JSON만 출력하세요.
+  // Workers AI - LLaVA 모델로 이미지 분석 (Vision + Language)
+  const response = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+    image: [...imageData],
+    prompt: `This is a receipt image. Please analyze it and extract the following information in JSON format only. Do not include any other text.
 
 {
-  "date": "YYMMDD 형식의 날짜 (예: 260127)",
-  "time": "HHMMSS 형식의 시간 (예: 143052)",
-  "merchant": "결제처/가맹점 이름",
-  "amount": "결제 금액 (숫자만, 콤마 없이)",
-  "user_notes": "영수증 내용 요약 (예: KTX 광명→부산, LPG 주유, 주차비, 식비 등)"
+  "date": "date in YYMMDD format (e.g., 260127 for 2026-01-27)",
+  "time": "time in HHMMSS format (e.g., 143052 for 14:30:52)",
+  "merchant": "store/merchant name",
+  "amount": "total amount (numbers only, no commas)",
+  "user_notes": "brief description of what was purchased"
 }
 
-- 날짜를 찾을 수 없으면 date는 빈 문자열
-- 시간을 찾을 수 없으면 time은 빈 문자열
-- 결제처를 찾을 수 없으면 merchant는 "미확인"
-- 금액을 찾을 수 없으면 amount는 "0"
-- 영수증이 흐리거나 읽기 어려우면 user_notes에 "분석불가" 포함`
-            },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: base64,
-              }
-            }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
-        }
-      }),
-    }
-  );
+If you cannot find a value, use empty string for date/time, "unknown" for merchant, "0" for amount.
+Return ONLY the JSON object, no additional text.`,
+    max_tokens: 512,
+  });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API 오류: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
+  // 응답 텍스트 추출
+  let textContent = response.description || response.response || response.text || '';
   
-  // 응답에서 텍스트 추출
-  const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!textContent) {
-    throw new Error('Gemini 응답에서 텍스트를 찾을 수 없습니다');
+    throw new Error('AI 응답을 받지 못했습니다');
   }
 
-  // JSON 파싱 (마크다운 코드블록 제거)
+  // JSON 파싱 시도
   let jsonStr = textContent.trim();
+  
+  // 마크다운 코드블록 제거
   if (jsonStr.startsWith('```json')) {
     jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
   } else if (jsonStr.startsWith('```')) {
     jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
+  
+  // JSON 객체 추출 시도
+  const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[0];
+  }
 
   try {
     const result = JSON.parse(jsonStr);
     return {
-      date: result.date || '',
-      time: result.time || '',
+      date: String(result.date || '').replace(/[^0-9]/g, '').slice(0, 6),
+      time: String(result.time || '').replace(/[^0-9]/g, '').slice(0, 6),
       merchant: result.merchant || '미확인',
-      amount: String(result.amount || '0').replace(/,/g, ''),
+      amount: String(result.amount || '0').replace(/[^0-9]/g, ''),
       user_notes: result.user_notes || '',
     };
   } catch (parseError) {
-    throw new Error(`JSON 파싱 오류: ${parseError.message}`);
+    // JSON 파싱 실패 시 텍스트에서 정보 추출 시도
+    return {
+      date: '',
+      time: '',
+      merchant: '분석실패',
+      amount: '0',
+      user_notes: textContent.slice(0, 100),
+    };
   }
 }

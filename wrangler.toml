@@ -2,15 +2,15 @@ name = "automation"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
-# R2 버킷 바인딩 (Cloudflare 대시보드에서 버킷 생성 후 이름 입력)
+# R2 버킷 바인딩
 [[r2_buckets]]
 binding = "RECEIPTS_BUCKET"
 bucket_name = "receipts-storage"
 
+# Workers AI 바인딩 (무료, API 키 필요 없음)
+[ai]
+binding = "AI"
+
 # 정적 파일 서빙을 위한 assets 설정
 [assets]
 directory = "./public"
-
-# 환경변수 (Gemini API 키는 Cloudflare 대시보드에서 설정)
-# Workers & Pages → 해당 Worker → Settings → Variables → Environment Variables
-# GEMINI_API_KEY = "your-api-key-here" (Encrypt 체크)
