@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+venv/
+
+# Wrangler
+.wrangler/
+.dev.vars
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python (로컬 개발용)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local files (업로드 전용)
+uploads/
+output/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# 기존 Flask 파일 (배포에 불필요)
+app.py
+config.py
+analysis_results.json

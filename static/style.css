@@ -1,0 +1,279 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Pretendard", "Malgun Gothic", sans-serif;
+  background: linear-gradient(145deg, #1a1b2e 0%, #16213e 50%, #0f3460 100%);
+  color: #e8e8e8;
+  min-height: 100vh;
+  margin: 0;
+  padding: 1rem;
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.02em;
+}
+
+header p {
+  color: #a0aec0;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.step {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.step.hidden {
+  display: none;
+}
+
+/* Upload */
+.upload-zone {
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  padding: 2.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: #4299e1;
+  background: rgba(66, 153, 225, 0.08);
+}
+
+.upload-zone p {
+  margin: 0;
+  color: #a0aec0;
+}
+
+.scan-info {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.scan-info p {
+  margin: 0.5rem 0;
+}
+
+.scan-info .small {
+  font-size: 0.85rem;
+  color: #718096;
+}
+
+.scan-result {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.scan-result .success {
+  color: #68d391;
+}
+
+.scan-result .error {
+  color: #fc8181;
+}
+
+.filename {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #718096;
+  margin-top: 0.5rem;
+  word-break: break-all;
+}
+
+.upload-list {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: #a0aec0;
+}
+
+#btnStartOcr {
+  margin-top: 1rem;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn.primary {
+  background: #4299e1;
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: #3182ce;
+}
+
+.btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.secondary {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e8e8e8;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Slides */
+.slide-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+#slideCounter {
+  font-weight: 600;
+  color: #a0aec0;
+}
+
+.slide-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 700px) {
+  .slide-content {
+    grid-template-columns: 1fr;
+  }
+}
+
+.receipt-preview {
+  background: #0d1117;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.receipt-preview img {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  display: block;
+}
+
+.receipt-form .field {
+  margin-bottom: 1rem;
+}
+
+.receipt-form label {
+  display: block;
+  font-size: 0.8rem;
+  color: #a0aec0;
+  margin-bottom: 0.35rem;
+}
+
+.receipt-form input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: #e8e8e8;
+  font-size: 0.95rem;
+}
+
+.receipt-form input:focus {
+  outline: none;
+  border-color: #4299e1;
+  box-shadow: 0 0 0 2px rgba(66, 153, 225, 0.25);
+}
+
+.slide-nav {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+/* List */
+#step-list h2 {
+  font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+}
+
+#saveList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#saveList li {
+  padding: 0.65rem 0.85rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  border-left: 3px solid #4299e1;
+}
+
+.list-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.save-result {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.save-result.success {
+  background: rgba(72, 187, 120, 0.2);
+  border: 1px solid rgba(72, 187, 120, 0.4);
+  color: #68d391;
+}
+
+.save-result.error {
+  background: rgba(245, 101, 101, 0.2);
+  border: 1px solid rgba(245, 101, 101, 0.4);
+  color: #fc8181;
+}
+
+.save-result.hidden {
+  display: none;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "receipt-automation",
+  "version": "1.0.0",
+  "description": "영수증 자동화 시스템 - Cloudflare Workers + R2",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "keywords": ["receipt", "automation", "cloudflare", "workers", "r2"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

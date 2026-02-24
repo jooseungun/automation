@@ -1,0 +1,12 @@
+name = "receipt-automation"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# R2 버킷 바인딩 (Cloudflare 대시보드에서 버킷 생성 후 이름 입력)
+[[r2_buckets]]
+binding = "RECEIPTS_BUCKET"
+bucket_name = "receipts-storage"
+
+# 정적 파일 서빙을 위한 assets 설정
+[assets]
+directory = "./public"
