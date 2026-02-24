@@ -18,7 +18,9 @@
   const fileInput = document.getElementById("fileInput");
   const uploadResult = document.getElementById("uploadResult");
   const btnScan = document.getElementById("btnScan");
+  const btnAnalyzeAll = document.getElementById("btnAnalyzeAll");
   const scanResult = document.getElementById("scanResult");
+  const analyzeResult = document.getElementById("analyzeResult");
 
   // Slide elements
   const btnBackToUpload = document.getElementById("btnBackToUpload");
@@ -35,6 +37,7 @@
   const btnShowList = document.getElementById("btnShowList");
   const btnReload = document.getElementById("btnReload");
   const btnReloadAll = document.getElementById("btnReloadAll");
+  const btnAnalyzeOne = document.getElementById("btnAnalyzeOne");
 
   // List elements
   const saveListEl = document.getElementById("saveList");
@@ -116,6 +119,7 @@
     currentProjectNameEl.textContent = project.name;
     uploadResult.innerHTML = "";
     scanResult.innerHTML = "";
+    analyzeResult.classList.add("hidden");
     receipts = [];
     showStep("upload");
   }
@@ -539,6 +543,89 @@
       saveResult.textContent = "오류: " + e.message;
       saveResult.className = "save-result error";
       saveResult.classList.remove("hidden");
+    }
+  });
+
+  // ===== AI Analysis =====
+  
+  // 전체 파일 AI 분석
+  btnAnalyzeAll.addEventListener("click", async () => {
+    if (!currentProject) {
+      alert("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    
+    btnAnalyzeAll.disabled = true;
+    btnAnalyzeAll.textContent = "분석 중...";
+    analyzeResult.innerHTML = '<div class="analyze-progress"><div class="spinner"></div> AI가 영수증을 분석하고 있습니다...</div>';
+    analyzeResult.className = "analyze-result";
+    analyzeResult.classList.remove("hidden");
+    
+    try {
+      const res = await fetch(`/api/project/${currentProject.id}/analyze`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        analyzeResult.innerHTML = `❌ ${data.error || "분석 실패"}`;
+        analyzeResult.className = "analyze-result error";
+        return;
+      }
+      
+      let msg = `✅ AI 분석 완료!\n`;
+      msg += `총 ${data.totalFiles}개 파일 중 ${data.analyzed}개 분석 완료`;
+      if (data.skipped > 0) msg += `, ${data.skipped}개 건너뜀 (이미 분석됨)`;
+      if (data.errors > 0) msg += `, ${data.errors}개 오류`;
+      
+      analyzeResult.innerHTML = msg.replace(/\n/g, '<br>');
+      analyzeResult.className = "analyze-result success";
+      
+    } catch (e) {
+      analyzeResult.innerHTML = `❌ 오류: ${e.message}`;
+      analyzeResult.className = "analyze-result error";
+    } finally {
+      btnAnalyzeAll.disabled = false;
+      btnAnalyzeAll.textContent = "🤖 AI 전체 분석";
+    }
+  });
+  
+  // 단일 파일 AI 분석
+  btnAnalyzeOne.addEventListener("click", async () => {
+    const r = receipts[currentSlideIndex];
+    if (!r || !currentProject) return;
+    
+    btnAnalyzeOne.disabled = true;
+    btnAnalyzeOne.textContent = "분석 중...";
+    
+    try {
+      const res = await fetch(`/api/project/${currentProject.id}/analyze/${encodeURIComponent(r.filename)}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      
+      if (!res.ok || !data.success) {
+        alert(`분석 실패: ${data.error || "알 수 없는 오류"}`);
+        return;
+      }
+      
+      // 결과 적용
+      if (data.result) {
+        if (data.result.date) r.date = data.result.date;
+        if (data.result.time) r.time = data.result.time;
+        if (data.result.merchant) r.merchant = data.result.merchant;
+        if (data.result.amount) r.amount = data.result.amount;
+        if (data.result.user_notes) r.user_notes = data.result.user_notes;
+        
+        renderSlide();
+        alert("AI 분석 완료! 결과가 입력되었습니다.");
+      }
+      
+    } catch (e) {
+      alert(`오류: ${e.message}`);
+    } finally {
+      btnAnalyzeOne.disabled = false;
+      btnAnalyzeOne.textContent = "🤖 AI 분석";
     }
   });
 

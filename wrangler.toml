@@ -10,3 +10,7 @@ bucket_name = "receipts-storage"
 # 정적 파일 서빙을 위한 assets 설정
 [assets]
 directory = "./public"
+
+# 환경변수 (Gemini API 키는 Cloudflare 대시보드에서 설정)
+# Workers & Pages → 해당 Worker → Settings → Variables → Environment Variables
+# GEMINI_API_KEY = "your-api-key-here" (Encrypt 체크)

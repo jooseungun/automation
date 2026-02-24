@@ -2,6 +2,7 @@
  * 영수증 자동화 - Cloudflare Workers 백엔드
  * R2 버킷을 사용하여 파일 저장/조회
  * 프로젝트별 데이터 분리 지원
+ * Gemini AI를 통한 영수증 자동 분석
  */
 
 export default {
@@ -94,6 +95,22 @@ export default {
         const projectId = parts[0];
         const filename = decodeURIComponent(parts[1]);
         return await handleDelete(projectId, filename, env, corsHeaders);
+      }
+      
+      // ===== AI 분석 API =====
+      
+      // 프로젝트 전체 파일 AI 분석
+      if (path.startsWith('/api/project/') && path.endsWith('/analyze') && request.method === 'POST') {
+        const projectId = path.replace('/api/project/', '').replace('/analyze', '');
+        return await handleAnalyzeAll(projectId, env, corsHeaders);
+      }
+      
+      // 단일 파일 AI 분석
+      if (path.startsWith('/api/project/') && path.includes('/analyze/') && request.method === 'POST') {
+        const parts = path.replace('/api/project/', '').split('/analyze/');
+        const projectId = parts[0];
+        const filename = decodeURIComponent(parts[1]);
+        return await handleAnalyzeFile(projectId, filename, env, corsHeaders);
       }
 
       // 정적 파일은 assets에서 자동 서빙됨
@@ -455,4 +472,234 @@ function sanitizeFilename(str) {
   return str
     .replace(/[\\/:*?"<>|]/g, '')
     .trim() || 'unknown';
+}
+
+// ===== Gemini AI 분석 =====
+
+// 프로젝트 전체 파일 분석
+async function handleAnalyzeAll(projectId, env, corsHeaders) {
+  // API 키 확인
+  if (!env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ 
+      error: 'Gemini API 키가 설정되지 않았습니다. Cloudflare 대시보드에서 GEMINI_API_KEY 환경변수를 설정해주세요.' 
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const prefix = `projects/${projectId}/uploads/`;
+  const list = await env.RECEIPTS_BUCKET.list({ prefix });
+  
+  const files = list.objects
+    .filter(obj => !obj.key.endsWith('/'))
+    .map(obj => obj.key.replace(prefix, ''));
+  
+  if (files.length === 0) {
+    return new Response(JSON.stringify({ error: '분석할 파일이 없습니다' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 기존 분석 결과 불러오기
+  const resultsKey = `projects/${projectId}/analysis_results.json`;
+  let existingResults = {};
+  const existingObj = await env.RECEIPTS_BUCKET.get(resultsKey);
+  if (existingObj) {
+    existingResults = JSON.parse(await existingObj.text());
+  }
+
+  const results = { ...existingResults };
+  const analyzed = [];
+  const errors = [];
+
+  for (const filename of files) {
+    const fileId = filename.replace(/\.[^/.]+$/, '');
+    
+    // 이미 분석된 파일은 건너뛰기 (강제 재분석 원하면 별도 옵션 추가 가능)
+    if (results[fileId] && results[fileId].merchant) {
+      analyzed.push({ filename, status: 'skipped', reason: '이미 분석됨' });
+      continue;
+    }
+
+    try {
+      const result = await analyzeWithGemini(projectId, filename, env);
+      results[fileId] = result;
+      analyzed.push({ filename, status: 'success', result });
+    } catch (error) {
+      errors.push({ filename, error: error.message });
+      analyzed.push({ filename, status: 'error', error: error.message });
+    }
+  }
+
+  // 결과 저장
+  await env.RECEIPTS_BUCKET.put(resultsKey, JSON.stringify(results, null, 2), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+
+  return new Response(JSON.stringify({
+    success: true,
+    totalFiles: files.length,
+    analyzed: analyzed.filter(a => a.status === 'success').length,
+    skipped: analyzed.filter(a => a.status === 'skipped').length,
+    errors: errors.length,
+    details: analyzed,
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+// 단일 파일 분석
+async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
+  if (!env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ 
+      error: 'Gemini API 키가 설정되지 않았습니다.' 
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const result = await analyzeWithGemini(projectId, filename, env);
+    
+    // 결과 저장
+    const fileId = filename.replace(/\.[^/.]+$/, '');
+    const resultsKey = `projects/${projectId}/analysis_results.json`;
+    
+    let existingResults = {};
+    const existingObj = await env.RECEIPTS_BUCKET.get(resultsKey);
+    if (existingObj) {
+      existingResults = JSON.parse(await existingObj.text());
+    }
+    
+    existingResults[fileId] = result;
+    
+    await env.RECEIPTS_BUCKET.put(resultsKey, JSON.stringify(existingResults, null, 2), {
+      httpMetadata: { contentType: 'application/json' },
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      filename,
+      result,
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      success: false,
+      filename,
+      error: error.message,
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// Gemini API로 이미지 분석
+async function analyzeWithGemini(projectId, filename, env) {
+  const prefix = `projects/${projectId}/uploads/`;
+  const object = await env.RECEIPTS_BUCKET.get(`${prefix}${filename}`);
+  
+  if (!object) {
+    throw new Error('파일을 찾을 수 없습니다');
+  }
+
+  // 이미지를 base64로 변환
+  const arrayBuffer = await object.arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+  
+  // MIME 타입 결정
+  const ext = filename.split('.').pop().toLowerCase();
+  const mimeTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'pdf': 'application/pdf',
+  };
+  const mimeType = mimeTypes[ext] || 'image/jpeg';
+
+  // Gemini API 호출
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              text: `이 영수증 이미지를 분석해서 다음 정보를 JSON 형식으로 추출해주세요.
+반드시 아래 형식의 JSON만 응답해주세요. 다른 텍스트 없이 JSON만 출력하세요.
+
+{
+  "date": "YYMMDD 형식의 날짜 (예: 260127)",
+  "time": "HHMMSS 형식의 시간 (예: 143052)",
+  "merchant": "결제처/가맹점 이름",
+  "amount": "결제 금액 (숫자만, 콤마 없이)",
+  "user_notes": "영수증 내용 요약 (예: KTX 광명→부산, LPG 주유, 주차비, 식비 등)"
+}
+
+- 날짜를 찾을 수 없으면 date는 빈 문자열
+- 시간을 찾을 수 없으면 time은 빈 문자열
+- 결제처를 찾을 수 없으면 merchant는 "미확인"
+- 금액을 찾을 수 없으면 amount는 "0"
+- 영수증이 흐리거나 읽기 어려우면 user_notes에 "분석불가" 포함`
+            },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: base64,
+              }
+            }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1024,
+        }
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API 오류: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  // 응답에서 텍스트 추출
+  const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textContent) {
+    throw new Error('Gemini 응답에서 텍스트를 찾을 수 없습니다');
+  }
+
+  // JSON 파싱 (마크다운 코드블록 제거)
+  let jsonStr = textContent.trim();
+  if (jsonStr.startsWith('```json')) {
+    jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+
+  try {
+    const result = JSON.parse(jsonStr);
+    return {
+      date: result.date || '',
+      time: result.time || '',
+      merchant: result.merchant || '미확인',
+      amount: String(result.amount || '0').replace(/,/g, ''),
+      user_notes: result.user_notes || '',
+    };
+  } catch (parseError) {
+    throw new Error(`JSON 파싱 오류: ${parseError.message}`);
+  }
 }

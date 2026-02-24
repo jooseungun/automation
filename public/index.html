@@ -41,8 +41,14 @@
         <input type="file" id="fileInput" multiple accept="image/*,.pdf" hidden />
       </div>
       <div id="uploadResult" class="upload-result"></div>
-      <button type="button" id="btnScan" class="btn primary">업로드된 파일 불러오기</button>
+      
+      <div class="action-buttons">
+        <button type="button" id="btnScan" class="btn primary">업로드된 파일 불러오기</button>
+        <button type="button" id="btnAnalyzeAll" class="btn ai-btn">🤖 AI 전체 분석</button>
+      </div>
+      
       <div id="scanResult" class="scan-result"></div>
+      <div id="analyzeResult" class="analyze-result hidden"></div>
     </section>
 
     <!-- Step 2: 슬라이드 입력 -->
@@ -53,6 +59,7 @@
           <span id="slideCounter">1 / 1</span>
         </div>
         <div>
+          <button type="button" id="btnAnalyzeOne" class="btn ai-btn btn-small">🤖 AI 분석</button>
           <button type="button" id="btnReload" class="btn secondary btn-small">결과 불러오기</button>
           <button type="button" id="btnReloadAll" class="btn secondary btn-small">전체 불러오기</button>
           <button type="button" id="btnShowList" class="btn secondary btn-small">리스트 보기</button>
