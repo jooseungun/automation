@@ -7,10 +7,6 @@ compatibility_date = "2024-01-01"
 binding = "RECEIPTS_BUCKET"
 bucket_name = "receipts-storage"
 
-# Workers AI 바인딩 (무료, API 키 필요 없음)
-[ai]
-binding = "AI"
-
 # 정적 파일 서빙을 위한 assets 설정
 [assets]
 directory = "./public"

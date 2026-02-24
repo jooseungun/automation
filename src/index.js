@@ -474,20 +474,18 @@ function sanitizeFilename(str) {
     .trim() || 'unknown';
 }
 
-// ===== Cloudflare Workers AI 분석 =====
+// ===== Gemini AI 분석 (Rate Limit 대응) =====
+
+const GEMINI_API_KEY = 'AIzaSyCisDyEid5f_wM9agIa6WWH0kXSObTttMw';
+const DELAY_BETWEEN_REQUESTS = 5000; // 5초 딜레이 (분당 12요청 = 안전 마진)
+
+// 딜레이 함수
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // 프로젝트 전체 파일 분석
 async function handleAnalyzeAll(projectId, env, corsHeaders) {
-  // Workers AI 바인딩 확인
-  if (!env.AI) {
-    return new Response(JSON.stringify({ 
-      error: 'Workers AI가 설정되지 않았습니다. wrangler.toml에 AI 바인딩을 추가해주세요.' 
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
   const prefix = `projects/${projectId}/uploads/`;
   const list = await env.RECEIPTS_BUCKET.list({ prefix });
   
@@ -514,22 +512,41 @@ async function handleAnalyzeAll(projectId, env, corsHeaders) {
   const analyzed = [];
   const errors = [];
 
-  for (const filename of files) {
+  for (let i = 0; i < files.length; i++) {
+    const filename = files[i];
     const fileId = filename.replace(/\.[^/.]+$/, '');
     
     // 이미 분석된 파일은 건너뛰기
-    if (results[fileId] && results[fileId].merchant) {
+    if (results[fileId] && results[fileId].merchant && results[fileId].merchant !== '미확인' && results[fileId].merchant !== '분석실패') {
       analyzed.push({ filename, status: 'skipped', reason: '이미 분석됨' });
       continue;
     }
 
     try {
-      const result = await analyzeWithWorkersAI(projectId, filename, env);
+      const result = await analyzeWithGemini(projectId, filename, env);
       results[fileId] = result;
       analyzed.push({ filename, status: 'success', result });
     } catch (error) {
-      errors.push({ filename, error: error.message });
-      analyzed.push({ filename, status: 'error', error: error.message });
+      // Rate Limit 오류 시 대기 후 재시도
+      if (error.message.includes('429') || error.message.includes('RATE_LIMIT') || error.message.includes('quota')) {
+        await delay(60000); // 60초 대기
+        try {
+          const result = await analyzeWithGemini(projectId, filename, env);
+          results[fileId] = result;
+          analyzed.push({ filename, status: 'success', result });
+        } catch (retryError) {
+          errors.push({ filename, error: retryError.message });
+          analyzed.push({ filename, status: 'error', error: retryError.message });
+        }
+      } else {
+        errors.push({ filename, error: error.message });
+        analyzed.push({ filename, status: 'error', error: error.message });
+      }
+    }
+
+    // 다음 요청 전 딜레이 (마지막 파일 제외)
+    if (i < files.length - 1) {
+      await delay(DELAY_BETWEEN_REQUESTS);
     }
   }
 
@@ -552,17 +569,8 @@ async function handleAnalyzeAll(projectId, env, corsHeaders) {
 
 // 단일 파일 분석
 async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
-  if (!env.AI) {
-    return new Response(JSON.stringify({ 
-      error: 'Workers AI가 설정되지 않았습니다.' 
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
   try {
-    const result = await analyzeWithWorkersAI(projectId, filename, env);
+    const result = await analyzeWithGemini(projectId, filename, env);
     
     // 결과 저장
     const fileId = filename.replace(/\.[^/.]+$/, '');
@@ -599,8 +607,8 @@ async function handleAnalyzeFile(projectId, filename, env, corsHeaders) {
   }
 }
 
-// Cloudflare Workers AI로 이미지 분석
-async function analyzeWithWorkersAI(projectId, filename, env) {
+// Gemini API로 이미지 분석
+async function analyzeWithGemini(projectId, filename, env) {
   const prefix = `projects/${projectId}/uploads/`;
   const object = await env.RECEIPTS_BUCKET.get(`${prefix}${filename}`);
   
@@ -608,45 +616,94 @@ async function analyzeWithWorkersAI(projectId, filename, env) {
     throw new Error('파일을 찾을 수 없습니다');
   }
 
-  // 이미지를 Uint8Array로 변환
-  const imageData = new Uint8Array(await object.arrayBuffer());
+  // 이미지를 base64로 변환
+  const arrayBuffer = await object.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  const base64 = btoa(binary);
   
-  // Workers AI - LLaVA 모델로 이미지 분석 (Vision + Language)
-  const response = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
-    image: [...imageData],
-    prompt: `This is a receipt image. Please analyze it and extract the following information in JSON format only. Do not include any other text.
+  // MIME 타입 결정
+  const ext = filename.split('.').pop().toLowerCase();
+  const mimeTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+  };
+  const mimeType = mimeTypes[ext] || 'image/jpeg';
+
+  // Gemini API 호출
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              text: `이 영수증/전표 이미지를 분석해서 다음 정보를 JSON 형식으로 추출해주세요.
+반드시 아래 형식의 JSON만 응답해주세요. 다른 텍스트 없이 JSON만 출력하세요.
 
 {
-  "date": "date in YYMMDD format (e.g., 260127 for 2026-01-27)",
-  "time": "time in HHMMSS format (e.g., 143052 for 14:30:52)",
-  "merchant": "store/merchant name",
-  "amount": "total amount (numbers only, no commas)",
-  "user_notes": "brief description of what was purchased"
+  "date": "YYMMDD 형식의 날짜 (예: 260123은 2026년 1월 23일)",
+  "time": "HHMMSS 형식의 시간 (예: 115520은 11시 55분 20초)",
+  "merchant": "결제처/가맹점/상호 이름",
+  "amount": "결제 금액 (숫자만, 콤마 없이)",
+  "user_notes": "영수증 내용을 간단히 요약 (예: 주차비, 식비, 주유, KTX 등)"
 }
 
-If you cannot find a value, use empty string for date/time, "unknown" for merchant, "0" for amount.
-Return ONLY the JSON object, no additional text.`,
-    max_tokens: 512,
-  });
+주의사항:
+- 날짜는 반드시 6자리 YYMMDD 형식 (2026-01-23 → 260123)
+- 시간은 반드시 6자리 HHMMSS 형식 (11:55:20 → 115520)
+- 금액은 숫자만 (4,000원 → 4000)
+- 찾을 수 없는 정보는 빈 문자열로
+- merchant가 없으면 "미확인"`
+            },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: base64,
+              }
+            }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1024,
+        }
+      }),
+    }
+  );
 
-  // 응답 텍스트 추출
-  let textContent = response.description || response.response || response.text || '';
-  
-  if (!textContent) {
-    throw new Error('AI 응답을 받지 못했습니다');
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API 오류: ${response.status} - ${errorText}`);
   }
 
-  // JSON 파싱 시도
-  let jsonStr = textContent.trim();
+  const data = await response.json();
   
-  // 마크다운 코드블록 제거
+  // 응답에서 텍스트 추출
+  const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textContent) {
+    throw new Error('Gemini 응답에서 텍스트를 찾을 수 없습니다');
+  }
+
+  // JSON 파싱 (마크다운 코드블록 제거)
+  let jsonStr = textContent.trim();
   if (jsonStr.startsWith('```json')) {
     jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
   } else if (jsonStr.startsWith('```')) {
     jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
   
-  // JSON 객체 추출 시도
+  // JSON 객체 추출
   const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     jsonStr = jsonMatch[0];
@@ -662,13 +719,6 @@ Return ONLY the JSON object, no additional text.`,
       user_notes: result.user_notes || '',
     };
   } catch (parseError) {
-    // JSON 파싱 실패 시 텍스트에서 정보 추출 시도
-    return {
-      date: '',
-      time: '',
-      merchant: '분석실패',
-      amount: '0',
-      user_notes: textContent.slice(0, 100),
-    };
+    throw new Error(`JSON 파싱 오류: ${parseError.message}`);
   }
 }
