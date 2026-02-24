@@ -112,6 +112,12 @@ export default {
         const filename = decodeURIComponent(parts[1]);
         return await handleAnalyzeFile(projectId, filename, env, corsHeaders);
       }
+      
+      // 분석 결과 초기화 (전체 재분석용)
+      if (path.startsWith('/api/project/') && path.endsWith('/reset-analysis') && request.method === 'POST') {
+        const projectId = path.replace('/api/project/', '').replace('/reset-analysis', '');
+        return await handleResetAnalysis(projectId, env, corsHeaders);
+      }
 
       // 정적 파일은 assets에서 자동 서빙됨
       return new Response('Not Found', { status: 404, headers: corsHeaders });
@@ -516,8 +522,13 @@ async function handleAnalyzeAll(projectId, env, corsHeaders) {
     const filename = files[i];
     const fileId = filename.replace(/\.[^/.]+$/, '');
     
-    // 이미 분석된 파일은 건너뛰기
-    if (results[fileId] && results[fileId].merchant && results[fileId].merchant !== '미확인' && results[fileId].merchant !== '분석실패') {
+    // 이미 정상 분석된 파일만 건너뛰기 (금액이 있고, 분석실패/미확인이 아닌 경우)
+    if (results[fileId] && 
+        results[fileId].merchant && 
+        results[fileId].merchant !== '미확인' && 
+        results[fileId].merchant !== '분석실패' &&
+        results[fileId].amount && 
+        results[fileId].amount !== '0') {
       analyzed.push({ filename, status: 'skipped', reason: '이미 분석됨' });
       continue;
     }
@@ -721,4 +732,21 @@ async function analyzeWithGemini(projectId, filename, env) {
   } catch (parseError) {
     throw new Error(`JSON 파싱 오류: ${parseError.message}`);
   }
+}
+
+// 분석 결과 초기화
+async function handleResetAnalysis(projectId, env, corsHeaders) {
+  const resultsKey = `projects/${projectId}/analysis_results.json`;
+  
+  // 빈 객체로 초기화
+  await env.RECEIPTS_BUCKET.put(resultsKey, JSON.stringify({}), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  
+  return new Response(JSON.stringify({
+    success: true,
+    message: '분석 결과가 초기화되었습니다. 다시 AI 분석을 실행해주세요.',
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }

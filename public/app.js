@@ -19,6 +19,7 @@
   const uploadResult = document.getElementById("uploadResult");
   const btnScan = document.getElementById("btnScan");
   const btnAnalyzeAll = document.getElementById("btnAnalyzeAll");
+  const btnResetAnalysis = document.getElementById("btnResetAnalysis");
   const scanResult = document.getElementById("scanResult");
   const analyzeResult = document.getElementById("analyzeResult");
 
@@ -547,6 +548,40 @@
   });
 
   // ===== AI Analysis =====
+  
+  // 분석 결과 초기화
+  btnResetAnalysis.addEventListener("click", async () => {
+    if (!currentProject) {
+      alert("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    
+    if (!confirm("기존 분석 결과를 모두 삭제하고 초기화합니다.\n계속하시겠습니까?")) {
+      return;
+    }
+    
+    btnResetAnalysis.disabled = true;
+    btnResetAnalysis.textContent = "초기화 중...";
+    
+    try {
+      const res = await fetch(`/api/project/${currentProject.id}/reset-analysis`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        alert("분석 결과가 초기화되었습니다.\nAI 전체 분석 버튼을 눌러 다시 분석해주세요.");
+        analyzeResult.classList.add("hidden");
+      } else {
+        alert(data.error || "초기화 실패");
+      }
+    } catch (e) {
+      alert("오류: " + e.message);
+    } finally {
+      btnResetAnalysis.disabled = false;
+      btnResetAnalysis.textContent = "🔄 분석 초기화";
+    }
+  });
   
   // 전체 파일 AI 분석
   btnAnalyzeAll.addEventListener("click", async () => {
