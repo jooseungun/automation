@@ -482,7 +482,6 @@ function sanitizeFilename(str) {
 
 // ===== Gemini AI 분석 (Rate Limit 대응) =====
 
-const GEMINI_API_KEY = 'AIzaSyCisDyEid5f_wM9agIa6WWH0kXSObTttMw';
 const DELAY_BETWEEN_REQUESTS = 5000; // 5초 딜레이 (분당 12요청 = 안전 마진)
 
 // 딜레이 함수
@@ -647,9 +646,14 @@ async function analyzeWithGemini(projectId, filename, env) {
   };
   const mimeType = mimeTypes[ext] || 'image/jpeg';
 
-  // Gemini API 호출
+  // Gemini API 호출 (환경변수에서 API 키 가져오기)
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY 환경변수가 설정되지 않았습니다');
+  }
+  
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: {
