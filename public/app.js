@@ -562,6 +562,17 @@
     analyzeResult.classList.remove("hidden");
     
     try {
+      // 먼저 파일 목록 가져오기
+      const scanRes = await fetch(`/api/project/${currentProject.id}/scan`);
+      const scanData = await scanRes.json();
+      
+      if (scanData.count === 0) {
+        analyzeResult.innerHTML = `❌ 분석할 파일이 없습니다. 먼저 파일을 업로드해주세요.`;
+        analyzeResult.className = "analyze-result error";
+        return;
+      }
+      
+      // AI 분석 실행
       const res = await fetch(`/api/project/${currentProject.id}/analyze`, {
         method: "POST",
       });
@@ -573,13 +584,56 @@
         return;
       }
       
-      let msg = `✅ AI 분석 완료!\n`;
-      msg += `총 ${data.totalFiles}개 파일 중 ${data.analyzed}개 분석 완료`;
-      if (data.skipped > 0) msg += `, ${data.skipped}개 건너뜀 (이미 분석됨)`;
+      let msg = `✅ AI 분석 완료! `;
+      msg += `${data.analyzed}개 분석`;
+      if (data.skipped > 0) msg += `, ${data.skipped}개 건너뜀`;
       if (data.errors > 0) msg += `, ${data.errors}개 오류`;
       
-      analyzeResult.innerHTML = msg.replace(/\n/g, '<br>');
+      analyzeResult.innerHTML = msg;
       analyzeResult.className = "analyze-result success";
+      
+      // receipts 배열 초기화 및 분석 결과 로드
+      var now = new Date();
+      var yy = String(now.getFullYear()).slice(-2);
+      var mm = String(now.getMonth() + 1).padStart(2, "0");
+      var dd = String(now.getDate()).padStart(2, "0");
+      var hh = String(now.getHours()).padStart(2, "0");
+      var min = String(now.getMinutes()).padStart(2, "0");
+      var sec = String(now.getSeconds()).padStart(2, "0");
+
+      receipts = scanData.files.map(f => ({
+        id: f.id,
+        filename: f.filename,
+        original_name: f.original_name,
+        date: yy + mm + dd,
+        time: hh + min + sec,
+        merchant: "",
+        amount: "",
+        user_notes: "",
+      }));
+      
+      // 분석 결과 불러와서 적용
+      const resResults = await fetch(`/api/project/${currentProject.id}/results`);
+      const results = await resResults.json();
+      
+      for (const r of receipts) {
+        const d = results[r.id];
+        if (d) {
+          if (d.date) r.date = d.date;
+          if (d.time) r.time = d.time;
+          if (d.merchant) r.merchant = d.merchant;
+          if (d.amount) r.amount = d.amount;
+          if (d.user_notes) r.user_notes = d.user_notes;
+        }
+      }
+      
+      currentSlideIndex = 0;
+      
+      // 1초 후 슬라이드 화면으로 이동
+      setTimeout(() => {
+        showStep("slides");
+        renderSlide();
+      }, 1000);
       
     } catch (e) {
       analyzeResult.innerHTML = `❌ 오류: ${e.message}`;
