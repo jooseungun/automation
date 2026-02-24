@@ -624,8 +624,19 @@
       if (data.skipped > 0) msg += `, ${data.skipped}개 건너뜀`;
       if (data.errors > 0) msg += `, ${data.errors}개 오류`;
       
+      // 오류 상세 내용 표시
+      if (data.details) {
+        const errorDetails = data.details.filter(d => d.status === 'error');
+        if (errorDetails.length > 0) {
+          msg += '<br><br><strong>오류 상세:</strong><br>';
+          errorDetails.forEach(e => {
+            msg += `- ${e.filename}: ${e.error}<br>`;
+          });
+        }
+      }
+      
       analyzeResult.innerHTML = msg;
-      analyzeResult.className = "analyze-result success";
+      analyzeResult.className = data.errors > 0 ? "analyze-result error" : "analyze-result success";
       
       // receipts 배열 초기화 및 분석 결과 로드
       var now = new Date();
